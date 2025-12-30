@@ -1,0 +1,151 @@
+#!/usr/bin/env python3
+
+from PIL import Image
+from PIL.ExifTags import TAGS
+import sys
+
+IMPORTANT = [
+	"DateTime",
+	"DateTimeOriginal",
+	"Make",
+	"Model",
+	"Software",
+	"GPSInfo"
+]
+
+def delete_matadata(name):
+	try:
+		img = Image.open(name)
+	except:
+		print("[~] Error opening: ", name)
+		return
+	
+	new_name = "new_" + name
+
+	try:
+		img.save(new_name)
+		print("[+] Metadata deleted: ", new_name)
+	except:
+		print("[~] Error saving: ", new_name)
+		return
+
+def scorpion(name):
+	try:
+		img = Image.open(name)
+	except:
+		print("[-] Error opening: ", name)
+		return
+
+	exif_data = img.getexif()
+
+	if not exif_data:
+		print("No Exif data found.")
+		return
+
+	for tag, value in exif_data.items():
+		tag_name = TAGS.get(tag, tag)
+		if tag_name in IMPORTANT:
+			print("[*]", tag_name, ":", value)
+		else:
+			print(tag_name, ":", value)
+
+delete_data = False
+
+if "--delete" in sys.argv:
+	delete_data = True
+	sys.argv.remove("--delete")
+
+
+for file in sys.argv[1:]:
+	print("File:", file)
+	if delete_data:
+		delete_matadata(file)
+	else:
+		scorpion(file)
+	print("*" * 35)
+
+
+#=============GUI_part==========
+	
+
+import tkinter as tk
+from tkinter import filedialog
+import os
+
+def start_gui():
+	global img_name
+
+	img_name = None
+
+	window = tk.Tk()
+	window.title("Scorpion")
+	window.geometry("600x500")
+
+	def delete_matadata_gui():
+
+		if not img_name:
+			print("HHHHHH")
+			return
+
+		try:
+			img = Image.open(img_name)
+		except:
+			print("[~] Error opening: ", img_name)
+			return
+		
+		name = os.path.basename(img_name)
+		new_name = "new_" + name
+
+		try:
+			img.save(new_name)
+			text.insert(tk.END, f"[!] Metadata deleted: {new_name}\n")
+		except:
+			text.insert(tk.END, f"[~] Error saving: {new_name}\n")
+			return
+
+	def open_file():
+		global img_name
+
+		file_path = filedialog.askopenfilename(
+			filetypes=[("Images", "*.jpg *.jpeg *.png *.gif *.bmp")]
+		)
+	
+		if not file_path:
+			return
+
+		text.delete("1.0", tk.END)
+
+		try:
+			img = Image.open(file_path)
+			print("[+] Opened file:", file_path)
+		except:
+			text.insert(tk.END, f"[-] Error opening the file {file_path}")
+			return
+
+		exif_data = img.getexif()
+		
+		if not exif_data:
+			text.insert(tk.END, f"[-] No exif data found\n")
+			return
+
+		for tag, value in exif_data.items():
+			tag_name = TAGS.get(tag, tag)
+			if tag_name in IMPORTANT:
+				text.insert(tk.END, f"[*] {tag_name} : {value}\n")
+			else:
+				text.insert(tk.END, f"[~] {tag_name} : {value}\n")
+		img_name = file_path
+		delete_btn.pack(pady=10)
+
+	btn = tk.Button(window, text="Select Image", command=open_file)
+	btn.pack(pady=10)
+
+	text = tk.Text(window)
+	text.pack(expand=True, pady=5, padx=5)
+
+	delete_btn = tk.Button(window, text="Delete EXIF DATA", command=delete_matadata_gui)
+
+	window.mainloop()
+
+if len(sys.argv) == 1:
+	start_gui()

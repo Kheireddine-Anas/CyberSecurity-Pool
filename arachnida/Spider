@@ -1,0 +1,93 @@
+#!/usr/bin/env python3
+
+import requests
+import os
+import sys
+from bs4 import BeautifulSoup
+from urllib.parse import urljoin
+
+IMAGE_EXTENSIONS = (".jpg", ".jpeg", ".png", ".gif", ".bmp")
+downloaded_imgs = set()
+visited = set()
+
+def download_image(img_url, path):
+	if not img_url.lower().endswith(IMAGE_EXTENSIONS):
+		return
+	
+	if img_url in downloaded_imgs:
+		return
+
+	name = img_url.split("/")[-1]
+	try:
+		response = requests.get(img_url)
+	except requests.exceptions.RequestException as e:
+		print("[-] Image not downloaded: ", name)
+		return
+
+	if "image" not in response.headers.get("Content-Type", ""):
+		print("[-] Error Content-Type: ", response.headers.get("Content-Type"))
+		return
+
+	os.makedirs(path, exist_ok=True)
+	with open(path + "/" + name, "wb") as f:
+		f.write(response.content)
+
+	downloaded_imgs.add(img_url)
+	print("[+] Downloaded image: ", name)
+
+def spider(url, path, depth):
+	if depth <  1:
+		return
+
+	if url in visited:
+		return
+
+	visited.add(url)
+	print("[+] Link: ", url, "Depth: ", depth)
+
+	try:
+		response = requests.get(url, timeout=5)
+	except requests.exceptions.RequestException as e:
+		print("Request Failed: ", e)
+		return
+
+	soup = BeautifulSoup(response.text, "html.parser")
+	images = soup.find_all("img")
+
+	for img in images:
+		src = img.get("src")
+		if src:
+			full_url = urljoin(url, src)
+			download_image(full_url, path)
+
+	for a in soup.find_all("a"):
+		href = a.get("href")
+		if href:
+			full_url = urljoin(url, href)
+			spider(full_url, path, depth - 1)
+
+path = "data"
+depth = 1
+recursion = False
+
+if "-p" in sys.argv:
+	i = sys.argv.index("-p")
+	if i + 1 >= len(sys.argv) or sys.argv[i + 1].startswith("-"):
+		print("[-] Please provide a valid path after -p")
+		sys.exit(1)
+	path = sys.argv [i + 1]
+
+if "-r" in sys.argv:
+	recursion = True
+	depth = 5
+
+if recursion and "-l" in sys.argv:
+	i = sys.argv.index("-l")
+	if type(sys.argv[i + 1]) is not int:
+		print("[-] Please provide a valid depth after -l")
+		sys.exit(1)
+	depth = int(sys.argv[i + 1])
+
+url = sys.argv[- 1]
+
+spider(url, path, depth)
