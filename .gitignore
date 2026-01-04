@@ -1,4 +1,5 @@
-# Encryption keys - NEVER commit these!
+# Secrets
+*.pem
 *.key
 ft_otp.key
 
