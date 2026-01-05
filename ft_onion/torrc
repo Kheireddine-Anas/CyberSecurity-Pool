@@ -1,0 +1,4 @@
+# Tor configuration for ft_onion hidden service
+HiddenServiceDir /var/lib/tor/hidden_service/ # Directory for the hidden service
+HiddenServicePort 80 127.0.0.1:80 # Forward HTTP traffic to local Nginx server
+HiddenServicePort 4242 127.0.0.1:4242 # Forward SSH traffic to local SSH server

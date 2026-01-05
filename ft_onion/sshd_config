@@ -1,0 +1,7 @@
+# SSH configuration for ft_onion
+Port 4242
+# This is the bonus: SSH fortification
+PermitRootLogin no
+PasswordAuthentication no
+AllowUsers youruser
+# Make sure to add your SSH public key to ~/.ssh/authorized_keys for youruser
