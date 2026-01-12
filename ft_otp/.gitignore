@@ -1,0 +1,27 @@
+# Generated files
+ft_otp.key
+ft_otp_qr.png
+*.key
+*.png
+
+# Test files
+test_key.hex
+key.hex
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Build
+build/
+dist/
+*.egg-info/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
