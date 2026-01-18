@@ -1,0 +1,60 @@
+version: '3.8'
+
+services:
+  # FTP Server
+  ftp_server:
+    image: fauria/vsftpd
+    container_name: ftp_server
+    environment:
+      - FTP_USER=ftpuser
+      - FTP_PASS=ftppass
+      - PASV_ADDRESS=127.0.0.1
+    ports:
+      - "21:21"
+      - "21100-21110:21100-21110"
+    networks:
+      test_network:
+        ipv4_address: 172.20.0.10
+    volumes:
+      - ftp_data:/home/vsftpd
+    restart: unless-stopped
+
+  # FTP Client
+  client:
+    image: alpine:latest
+    container_name: ftp_client
+    command: sleep infinity
+    networks:
+      test_network:
+        ipv4_address: 172.20.0.5
+    depends_on:
+      - ftp_server
+
+  # Attacker (Inquisitor)
+  attacker:
+    build: .
+    container_name: attacker
+    privileged: true
+    network_mode: "service:client"
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+    volumes:
+      - ./inquisitor:/app/inquisitor
+      - ./test_ftp.sh:/app/test_ftp.sh
+    depends_on:
+      - ftp_server
+      - client
+    stdin_open: true
+    tty: true
+    command: /bin/bash
+
+networks:
+  test_network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
+
+volumes:
+  ftp_data:
